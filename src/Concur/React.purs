@@ -1,7 +1,6 @@
 module Concur.React where
 
-import Concur.Core (mkWidget)
-import Concur.Core.Types (Result(..), Widget, runWidget)
+import Concur.Core.Types (Result(..), Widget, runWidget, mkWidget)
 import Control.Applicative (pure)
 import Control.Apply ((*>))
 import Control.Bind (bind, discard)
@@ -22,7 +21,7 @@ type HTML
 
 -- React requires wrapping state inside an object
 type ComponentState
-  = {view :: HTML}
+  = { view :: HTML }
 
 mkComponentState :: HTML -> ComponentState
 mkComponentState v = { view: v }
@@ -36,33 +35,38 @@ toReactClass :: forall props a. String -> HTML -> (Record props -> Widget HTML a
 toReactClass componentName initialView widgetBuilder = toReactClassWithMount componentName initialView mempty widgetBuilder
 
 toReactClassWithMount :: forall props a. String -> HTML -> Effect Unit -> (Record props -> Widget HTML a) -> R.ReactClass (Record props)
-toReactClassWithMount componentName initialView onMount widgetBuilder = R.component componentName \this -> do
-  props <- R.getProps this
-  -- TODO: Figure out why this delay is needed, else the widget doesn't render
-  let widget = affAction (delay (Milliseconds 0.0)) *> widgetBuilder props
-  _ <- runWidget widget \res -> do
-    case res of
-      View v -> do
-        R.writeState this (mkComponentState v)
-      _ -> log "Application exited"
-  pure { state: mkComponentState initialView
-       , render: render <$> R.getState this
-       , componentDidMount: onMount
-       }
+toReactClassWithMount componentName initialView onMount widgetBuilder =
+  R.component componentName \this -> do
+    props <- R.getProps this
+    -- TODO: Figure out why this delay is needed, else the widget doesn't render
+    let
+      widget = affAction (delay (Milliseconds 0.0)) *> widgetBuilder props
+    _ <-
+      runWidget widget \res -> do
+        case res of
+          View v -> do
+            R.writeState this (mkComponentState v)
+          _ -> log "Application exited"
+    pure
+      { state: mkComponentState initialView
+      , render: render <$> R.getState this
+      , componentDidMount: onMount
+      }
 
 toReactElement :: forall a. String -> HTML -> Widget HTML a -> R.ReactElement
-toReactElement componentName initialView widget =
-  R.createLeafElement reactClass {}
+toReactElement componentName initialView widget = R.createLeafElement reactClass {}
   where
   reactClass :: R.ReactClass (Record ())
   reactClass = toReactClass componentName initialView (const widget)
 
 -- Widget that performs an async action
 affAction :: forall v a. Aff a -> Widget v a
-affAction aff = mkWidget \cb -> do
-  fiber <- runAff (handler cb) aff
-  pure do
-    runAff_ mempty $ killFiber (error "cancelling aff") fiber
+affAction aff =
+  mkWidget \cb -> do
+    fiber <- runAff (handler cb) aff
+    pure do
+      runAff_ mempty $ killFiber (error "cancelling aff") fiber
   where
-    handler cb (Right r) = cb (Completed r)
-    handler _cb (Left _) = log "error calling aff"
+  handler cb (Right r) = cb (Completed r)
+
+  handler _cb (Left _) = log "error calling aff"
